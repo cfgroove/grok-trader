@@ -1,4 +1,4 @@
-# main.py — ZERO ERRORS + DAILY EMAIL SUMMARY
+# main.py — 24/7 Grok Trader with daily email from cfgroove@gmail.com
 import time
 import json
 import yfinance as yf
@@ -29,70 +29,63 @@ else:
 cash = 1000000.0
 positions = {s: 0 for s in SYMBOLS}
 risk_percent = 90
-start_value = cash + sum(positions.get(s,0) * yf.Ticker(s).history(period="1d")["Close"].iloc[-1] for s in SYMBOLS)
 last_email_date = None
 
 def safe_json_parse(text):
-    try:
-        return json.loads(text)
+    try: return json.loads(text)
     except:
-        try:
-            cleaned = text.strip()
-            if cleaned.count('{') != cleaned.count('}'):
-                brace = cleaned.rfind('{')
-                cleaned = cleaned[brace:]
-            if cleaned.count('[') != cleaned.count(']'):
-                cleaned = cleaned[:cleaned.rfind('}')+1]
-            return json.loads(cleaned)
-        except:
-            print("JSON parse failed — forcing HOLD")
-            return {"symbol":"TQQQ","action":"hold","qty":0,"reasoning":"Invalid JSON from Grok"}
+        try: return json.loads(text.strip()[text.find("{"):text.rfind("}")+1])
+        except: return {"symbol":"TQQQ","action":"hold","qty":0,"reasoning":"JSON parse failed — holding"}
 
 def send_daily_email():
     global last_email_date
-    today = date.today()
-    if last_email_date == today:
+    if last_email_date == date.today():
         return
-    total = cash + sum(positions.get(s,0) * yf.Ticker(s).history(period="1d")["Close"].iloc[-1] for s in SYMBOLS)
-    daily_pnl = total - start_value
-    daily_pct = (daily_pnl / start_value) * 100
+    prices = {s: yf.Ticker(s).history(period="1d")["Close"].iloc[-1] for s in SYMBOLS}
+    total = cash + sum(positions.get(s,0) * prices[s] for s in SYMBOLS)
+    daily_pnl = total - 1000000
+    daily_pct = daily_pnl / 1000000 * 100
 
-    msg = f"""
-    <h2>Grok Trader Daily Report — {today}</h2>
-    <p><b>Total Value:</b> ${total:,.2f}</p>
-    <p><b>Daily P&L:</b> ${daily_pnl:,.2f} ({daily_pct:+.2f}%)</p>
-    <p><b>Cash:</b> ${cash:,.2f}</p>
-    <p><b>Positions:</b><br>{'<br>'.join([f"{s}: {positions.get(s,0)} shares" for s in SYMBOLS if positions.get(s,0)>0])}</p>
-    <p><i>Live trading: {'ON' if LIVE_TRADING else 'OFF (paper)'}</i></p>
+    body = f"""
+    <h2>Grok Trader Daily Report — {date.today()}</h2>
+    <p><strong>Portfolio Value:</strong> ${total:,.2f}</p>
+    <p><strong>Daily P&L:</strong> ${daily_pnl:,.2f} ({daily_pct:+.2f}%)</p>
+    <p><strong>Cash:</strong> ${cash:,.2f}</p>
+    <p><strong>Positions:</strong><br>
+    {''.join([f"{s}: {positions.get(s,0)} shares @ ${prices[s]:.2f}<br>" for s in SYMBOLS if positions.get(s,0)>0]) or "None"}
+    </p>
+    <p><em>Live trading: {'ON' if LIVE_TRADING else 'OFF (paper)'}</em></p>
     """
-    email = MIMEText(msg, "html")
-    email["Subject"] = f"Grok Trader Report — {today} — {daily_pct:+.2f}%"
-    email["From"] = os.getenv("EMAIL_FROM")
-    email["To"] = os.getenv("EMAIL_TO")
+
+    msg = MIMEText(body, "html")
+    msg["Subject"] = f"Grok Trader Report — {date.today()} — {daily_pct:+.2f}%"
+    msg["From"] = "Grok Trader <cfgroove@gmail.com>"
+    msg["To"] = "chase@cfgroove.com"
 
     with smtplib.SMTP("smtp.gmail.com", 587) as server:
         server.starttls()
-        server.login(os.getenv("EMAIL_FROM"), os.getenv("EMAIL_PASS"))
-        server.send_message(email)
+        server.login("cfgroove@gmail.com", os.getenv("GMAIL_APP_PASSWORD"))
+        server.send_message(msg)
 
-    print(f"Daily email sent: {daily_pct:+.2f}%")
+    print(f"Daily email sent — {daily_pct:+.2f}%")
     sys.stdout.flush()
-    last_email_date = today
+    last_email_date = date.today()
 
-print("GROK TRADER LIVE — NO MORE RED ERRORS + DAILY EMAIL")
+print("GROK TRADER LIVE — DAILY EMAILS ENABLED")
 sys.stdout.flush()
 
 while True:
     try:
         prices = {s: yf.Ticker(s).history(period="1d")["Close"].iloc[-1] for s in SYMBOLS}
         total = cash + sum(positions.get(s,0) * prices[s] for s in SYMBOLS)
+        print(f"\n{datetime.now().strftime('%H:%M:%S')} | ${total:,.0f} | Cash ${cash:,.0f}")
+        sys.stdout.flush()
 
         prompt = f"Cash ${cash:,.0f} | Risk {risk_percent}% | Positions {positions} | Prices {json.dumps({s: round(prices[s], 2) for s in SYMBOLS})} → JSON: {{symbol,action:'buy'|'sell'|'hold',qty:int,reasoning:string}}"
-        resp = client.chat.completions.create(model="grok-3", messages=[{"role": "user", "content": prompt}], temperature=0.85)
+        resp = client.chat.completions.create(model="grok-3", messages=[{"role":"user","content":prompt}], temperature=0.85)
         d = safe_json_parse(resp.choices[0].message.content.strip())
 
-        sym = d.get("symbol","TQQQ")
-        if sym not in SYMBOLS: sym = "TQQQ"
+        sym = d.get("symbol","TQQQ") if d.get("symbol") in SYMBOLS else "TQQQ"
         action = d.get("action","hold")
         qty = d.get("qty",0)
         reason = d.get("reasoning","")
@@ -105,12 +98,11 @@ while True:
             qty = min(qty, max_qty)
             if qty > 0:
                 cash -= qty * price
-                positions[sym] += qty
+                positions[sym] = positions.get(sym,0) + qty
                 trade = f"BUY {qty} {sym}"
                 if trading_client and LIVE_TRADING:
                     order = MarketOrderRequest(symbol=sym.replace("-USD",""), qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.GTC)
                     trading_client.submit_order(order)
-
         elif action == "sell" and positions.get(sym,0,0) >= qty:
             cash += qty * price
             positions[sym] -= qty
@@ -119,11 +111,12 @@ while True:
                 order = MarketOrderRequest(symbol=sym.replace("-USD",""), qty=qty, side=OrderSide.SELL, time_in_force=TimeInForce.GTC)
                 trading_client.submit_order(order)
 
-        print(f"{datetime.now().strftime('%H:%M:%S')} | ${total:,.0f} → {trade} @ ${price:.2f} | {reason}")
+        print(f"TRADE → {trade} @ ${price:.2f} | {reason}")
         sys.stdout.flush()
 
         # Daily email at 4:30 PM ET
-        if datetime.now().hour == 16 and datetime.now().minute == 30:
+        now = datetime.now()
+        if now.hour == 16 and now.minute == 30:
             send_daily_email()
 
     except Exception as e:
