@@ -8,7 +8,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-LIVE_TRADING = True
+LIVE_TRADING = False
 SYMBOLS = ["TQQQ", "QQQ", "SOXL", "NVDA", "COIN"]
 SCENARIO = "situational_awareness"
 
