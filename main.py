@@ -53,22 +53,35 @@ while True:
         price = prices[sym]
         trade = "HOLD"
 
-        if action == "buy" and qty > 0:
-            max_qty = int((cash * risk_percent / 100) // price)
-            qty = min(qty, max_qty)
-            if qty > 0:
-                cash -= qty * price
-                positions[sym] = positions.get(sym,0) + qty
-                trade = f"BUY {qty} {sym}"
-                if alpaca and LIVE_TRADING:
-                    alpaca.submit_order(symbol=sym, qty=qty, side='buy', type='market', time_in_force='gtc')
-        elif action == "sell" and positions.get(sym,0,0) >= qty:
-            cash += qty * price
-            positions[sym] -= qty
-            trade = f"SELL {qty} {sym}"
-            if alpaca and LIVE_TRADING:
-                alpaca.submit_order(symbol=sym, qty=qty, side='sell', type='market', time_in_force='gtc')
+                        if action == "buy" and qty > 0:
+                    max_qty = int((cash * risk_percent / 100) // price)
+                    qty = min(qty, max_qty)
+                    if qty > 0:
+                        cash -= qty * price
+                        positions[sym] = positions.get(sym, 0) + qty
+                        trade = f"BUY {qty} {sym}"
+                        if trading_client and LIVE_TRADING:
+                            order = MarketOrderRequest(
+                                symbol=sym,
+                                qty=qty,
+                                side=OrderSide.BUY,
+                                time_in_force=TimeInForce.GTC
+                            )
+                            trading_client.submit_order(order)
 
+                elif action == "sell" and positions.get(sym, 0, 0) >= qty:
+                    cash += qty * price
+                    positions[sym] -= qty
+                    trade = f"SELL {qty} {sym}"
+                    if trading_client and LIVE_TRADING:
+                        order = MarketOrderRequest(
+                            symbol=sym,
+                            qty=qty,
+                            side=OrderSide.SELL,
+                            time_in_force=TimeInForce.GTC
+                        )
+                        trading_client.submit_order(order)
+                        
         print(f"TRADE → {trade} @ ${price:.2f} | {reason}")
 
     except Exception as e:
