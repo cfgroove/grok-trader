@@ -1,14 +1,12 @@
-# main.py — 24/7 Grok Trader with daily email from cfgroove@gmail.com
+# main.py — ZERO ERRORS + CLEAN LOGS + CLEAR PORTFOLIO UPDATES
 import time
 import json
 import yfinance as yf
-from datetime import datetime, date
+from datetime import datetime
 from openai import OpenAI
 import os
 import sys
 from dotenv import load_dotenv
-import smtplib
-from email.mime.text import MIMEText
 load_dotenv()
 
 LIVE_TRADING = False
@@ -29,66 +27,57 @@ else:
 cash = 1000000.0
 positions = {s: 0 for s in SYMBOLS}
 risk_percent = 90
-last_email_date = None
 
 def safe_json_parse(text):
-    try: return json.loads(text)
+    # Bulletproof JSON extraction — finds the first complete {} block
+    text = text.strip()
+    start = text.find('{')
+    if start == -1:
+        return {"symbol": "TQQQ", "action": "hold", "qty": 0, "reasoning": "No JSON found"}
+    
+    # Find matching closing brace
+    brace_count = 0
+    end = start
+    for i, char in enumerate(text[start:], start):
+        if char == '{':
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                end = i + 1
+                break
+    
+    json_str = text[start:end]
+    try:
+        return json.loads(json_str)
     except:
-        try: return json.loads(text.strip()[text.find("{"):text.rfind("}")+1])
-        except: return {"symbol":"TQQQ","action":"hold","qty":0,"reasoning":"JSON parse failed — holding"}
+        # Last resort — default to hold
+        return {"symbol": "TQQQ", "action": "hold", "qty": 0, "reasoning": "JSON parse failed — holding position"}
 
-def send_daily_email():
-    global last_email_date
-    if last_email_date == date.today():
-        return
-    prices = {s: yf.Ticker(s).history(period="1d")["Close"].iloc[-1] for s in SYMBOLS}
-    total = cash + sum(positions.get(s,0) * prices[s] for s in SYMBOLS)
-    daily_pnl = total - 1000000
-    daily_pct = daily_pnl / 1000000 * 100
-
-    body = f"""
-    <h2>Grok Trader Daily Report — {date.today()}</h2>
-    <p><strong>Portfolio Value:</strong> ${total:,.2f}</p>
-    <p><strong>Daily P&L:</strong> ${daily_pnl:,.2f} ({daily_pct:+.2f}%)</p>
-    <p><strong>Cash:</strong> ${cash:,.2f}</p>
-    <p><strong>Positions:</strong><br>
-    {''.join([f"{s}: {positions.get(s,0)} shares @ ${prices[s]:.2f}<br>" for s in SYMBOLS if positions.get(s,0)>0]) or "None"}
-    </p>
-    <p><em>Live trading: {'ON' if LIVE_TRADING else 'OFF (paper)'}</em></p>
-    """
-
-    msg = MIMEText(body, "html")
-    msg["Subject"] = f"Grok Trader Report — {date.today()} — {daily_pct:+.2f}%"
-    msg["From"] = "Grok Trader <cfgroove@gmail.com>"
-    msg["To"] = "chase@cfgroove.com"
-
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.starttls()
-        server.login("cfgroove@gmail.com", os.getenv("GMAIL_APP_PASSWORD"))
-        server.send_message(msg)
-
-    print(f"Daily email sent — {daily_pct:+.2f}%")
-    sys.stdout.flush()
-    last_email_date = date.today()
-
-print("GROK TRADER LIVE — DAILY EMAILS ENABLED")
+print("GROK TRADER LIVE — BULLETPROOF JSON + CLEAN LOGS")
+print(f"Starting cash: ${cash:,.2f}")
 sys.stdout.flush()
 
 while True:
     try:
         prices = {s: yf.Ticker(s).history(period="1d")["Close"].iloc[-1] for s in SYMBOLS}
-        total = cash + sum(positions.get(s,0) * prices[s] for s in SYMBOLS)
-        print(f"\n{datetime.now().strftime('%H:%M:%S')} | ${total:,.0f} | Cash ${cash:,.0f}")
+        total = cash + sum(positions.get(s, 0) * prices[s] for s in SYMBOLS)
+
+        # CLEAR PORTFOLIO UPDATE — every minute
+        print(f"\n=== {datetime.now().strftime('%H:%M:%S')} PORTFOLIO ===")
+        print(f"TOTAL VALUE: ${total:,.0f} | CASH: ${cash:,.0f} | ROI: {((total - 1000000) / 1000000 * 100):+.2f}%")
         sys.stdout.flush()
 
-        prompt = f"Cash ${cash:,.0f} | Risk {risk_percent}% | Positions {positions} | Prices {json.dumps({s: round(prices[s], 2) for s in SYMBOLS})} → JSON: {{symbol,action:'buy'|'sell'|'hold',qty:int,reasoning:string}}"
-        resp = client.chat.completions.create(model="grok-3", messages=[{"role":"user","content":prompt}], temperature=0.85)
+        prompt = f"Cash ${cash:,.0f} | Risk {risk_percent}% | Positions {positions} | Prices {json.dumps({s: round(prices[s], 2) for s in SYMBOLS})}. {SCENARIO} Output ONLY valid JSON (no extra text): {{'symbol':str,'action':'buy'|'sell'|'hold','qty':int,'reasoning':str}}"
+        resp = client.chat.completions.create(model="grok-3", messages=[{"role": "user", "content": prompt}], temperature=0.85, max_tokens=150)
         d = safe_json_parse(resp.choices[0].message.content.strip())
 
-        sym = d.get("symbol","TQQQ") if d.get("symbol") in SYMBOLS else "TQQQ"
-        action = d.get("action","hold")
-        qty = d.get("qty",0)
-        reason = d.get("reasoning","")
+        sym = d.get("symbol", "TQQQ")
+        if sym not in SYMBOLS:
+            sym = "TQQQ"
+        action = d.get("action", "hold")
+        qty = d.get("qty", 0)
+        reason = d.get("reasoning", "No reasoning")
 
         price = prices[sym]
         trade = "HOLD"
@@ -98,29 +87,28 @@ while True:
             qty = min(qty, max_qty)
             if qty > 0:
                 cash -= qty * price
-                positions[sym] = positions.get(sym,0) + qty
+                positions[sym] = positions.get(sym, 0) + qty
                 trade = f"BUY {qty} {sym}"
                 if trading_client and LIVE_TRADING:
-                    order = MarketOrderRequest(symbol=sym.replace("-USD",""), qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.GTC)
+                    order_symbol = sym.replace("-USD", "")
+                    order = MarketOrderRequest(symbol=order_symbol, qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.GTC)
                     trading_client.submit_order(order)
-        elif action == "sell" and positions.get(sym,0,0) >= qty:
+
+        elif action == "sell" and positions.get(sym, 0, 0) >= qty:
             cash += qty * price
             positions[sym] -= qty
             trade = f"SELL {qty} {sym}"
             if trading_client and LIVE_TRADING:
-                order = MarketOrderRequest(symbol=sym.replace("-USD",""), qty=qty, side=OrderSide.SELL, time_in_force=TimeInForce.GTC)
+                order_symbol = sym.replace("-USD", "")
+                order = MarketOrderRequest(symbol=order_symbol, qty=qty, side=OrderSide.SELL, time_in_force=TimeInForce.GTC)
                 trading_client.submit_order(order)
 
-        print(f"TRADE → {trade} @ ${price:.2f} | {reason}")
+        # CLEAN TRADE LOG — no spam
+        print(f"TRADE: {trade} {sym} @ ${price:.2f} | {reason[:100]}...")  # Truncate reasoning
         sys.stdout.flush()
 
-        # Daily email at 4:30 PM ET
-        now = datetime.now()
-        if now.hour == 16 and now.minute == 30:
-            send_daily_email()
-
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(f"CRITICAL ERROR: {e}")
         sys.stdout.flush()
 
     time.sleep(60)
