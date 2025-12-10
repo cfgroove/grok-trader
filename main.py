@@ -14,12 +14,19 @@ SCENARIO = "situational_awareness"
 
 client = OpenAI(api_key=os.getenv("XAI_API_KEY"), base_url="https://api.x.ai/v1")
 
-# Only import Alpaca if keys exist
+# Modern Alpaca SDK (works on Python 3.13+)
 if os.getenv("ALPACA_KEY") and os.getenv("ALPACA_SECRET"):
-    from alpaca_trade_api import REST
-    alpaca = REST(os.getenv("ALPACA_KEY"), os.getenv("ALPACA_SECRET"), base_url='https://paper-api.alpaca.markets' if not LIVE_TRADING else 'https://api.alpaca.markets')
+    from alpaca.trading.client import TradingClient
+    from alpaca.trading.requests import MarketOrderRequest
+    from alpaca.trading.enums import OrderSide, TimeInForce
+
+    trading_client = TradingClient(
+        os.getenv("ALPACA_KEY"),
+        os.getenv("ALPACA_SECRET"),
+        paper=not LIVE_TRADING
+    )
 else:
-    alpaca = None
+    trading_client = None
 
 cash = 1000000.0
 positions = {s: 0 for s in SYMBOLS}
