@@ -1,6 +1,5 @@
-pywebview
 yfinance
 pandas
 python-dotenv
 openai
-alpaca-trade-api
+alpaca-py
