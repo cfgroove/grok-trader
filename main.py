@@ -1,4 +1,4 @@
-# main.py — ZERO ERRORS + CLEAN LOGS + CLEAR PORTFOLIO UPDATES
+# main.py — BULLETPROOF: NO RED ERRORS + PORTFOLIO EVERY MINUTE
 import time
 import json
 import yfinance as yf
@@ -29,19 +29,19 @@ positions = {s: 0 for s in SYMBOLS}
 risk_percent = 90
 
 def safe_json_parse(text):
-    # Bulletproof JSON extraction — finds the first complete {} block
+    # Force extract JSON — ignore all extra text
     text = text.strip()
     start = text.find('{')
     if start == -1:
-        return {"symbol": "TQQQ", "action": "hold", "qty": 0, "reasoning": "No JSON found"}
+        return {"symbol": "TQQQ", "action": "hold", "qty": 0, "reasoning": "No JSON"}
     
-    # Find matching closing brace
+    # Find the end of the first complete JSON block
     brace_count = 0
-    end = start
-    for i, char in enumerate(text[start:], start):
-        if char == '{':
+    end = len(text)
+    for i in range(start, len(text)):
+        if text[i] == '{':
             brace_count += 1
-        elif char == '}':
+        elif text[i] == '}':
             brace_count -= 1
             if brace_count == 0:
                 end = i + 1
@@ -50,11 +50,11 @@ def safe_json_parse(text):
     json_str = text[start:end]
     try:
         return json.loads(json_str)
-    except:
-        # Last resort — default to hold
-        return {"symbol": "TQQQ", "action": "hold", "qty": 0, "reasoning": "JSON parse failed — holding position"}
+    except json.JSONDecodeError:
+        # Ultra-safe fallback
+        return {"symbol": "TQQQ", "action": "hold", "qty": 0, "reasoning": "Parse failed — holding"}
 
-print("GROK TRADER LIVE — BULLETPROOF JSON + CLEAN LOGS")
+print("GROK TRADER LIVE — BULLETPROOF NO ERRORS")
 print(f"Starting cash: ${cash:,.2f}")
 sys.stdout.flush()
 
@@ -63,13 +63,23 @@ while True:
         prices = {s: yf.Ticker(s).history(period="1d")["Close"].iloc[-1] for s in SYMBOLS}
         total = cash + sum(positions.get(s, 0) * prices[s] for s in SYMBOLS)
 
-        # CLEAR PORTFOLIO UPDATE — every minute
-        print(f"\n=== {datetime.now().strftime('%H:%M:%S')} PORTFOLIO ===")
-        print(f"TOTAL VALUE: ${total:,.0f} | CASH: ${cash:,.0f} | ROI: {((total - 1000000) / 1000000 * 100):+.2f}%")
+        # PORTFOLIO UPDATE — EVERY MINUTE, ALWAYS
+        print(f"\n=== {datetime.now().strftime('%H:%M:%S')} PORTFOLIO UPDATE ===")
+        print(f"TOTAL: ${total:,.0f} | CASH: ${cash:,.0f} | ROI: {((total - 1000000) / 1000000 * 100):+.2f}%")
+        print(f"POSITIONS: {positions}")
         sys.stdout.flush()
 
-        prompt = f"Cash ${cash:,.0f} | Risk {risk_percent}% | Positions {positions} | Prices {json.dumps({s: round(prices[s], 2) for s in SYMBOLS})}. {SCENARIO} Output ONLY valid JSON (no extra text): {{'symbol':str,'action':'buy'|'sell'|'hold','qty':int,'reasoning':str}}"
-        resp = client.chat.completions.create(model="grok-3", messages=[{"role": "user", "content": prompt}], temperature=0.85, max_tokens=150)
+        # FORCE CLEAN JSON — Grok must obey
+        prompt = f"""Cash ${cash:,.0f} | Risk {risk_percent}% | Positions {positions} | Prices {json.dumps({s: round(prices[s], 2) for s in SYMBOLS})}. {SCENARIO}
+
+OUTPUT ONLY VALID JSON, NO EXTRA TEXT:
+{{
+  "symbol": "TQQQ",
+  "action": "buy" or "sell" or "hold",
+  "qty": integer,
+  "reasoning": "short reason"
+}}"""
+        resp = client.chat.completions.create(model="grok-3", messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=100)
         d = safe_json_parse(resp.choices[0].message.content.strip())
 
         sym = d.get("symbol", "TQQQ")
@@ -77,7 +87,7 @@ while True:
             sym = "TQQQ"
         action = d.get("action", "hold")
         qty = d.get("qty", 0)
-        reason = d.get("reasoning", "No reasoning")
+        reason = d.get("reasoning", "No reason")
 
         price = prices[sym]
         trade = "HOLD"
@@ -103,12 +113,12 @@ while True:
                 order = MarketOrderRequest(symbol=order_symbol, qty=qty, side=OrderSide.SELL, time_in_force=TimeInForce.GTC)
                 trading_client.submit_order(order)
 
-        # CLEAN TRADE LOG — no spam
-        print(f"TRADE: {trade} {sym} @ ${price:.2f} | {reason[:100]}...")  # Truncate reasoning
+        # CLEAN TRADE LOG
+        print(f"TRADE: {trade} {sym} @ ${price:.2f} | {reason}")
         sys.stdout.flush()
 
     except Exception as e:
-        print(f"CRITICAL ERROR: {e}")
+        print(f"CRITICAL ERROR: {e} — continuing...")
         sys.stdout.flush()
 
     time.sleep(60)
