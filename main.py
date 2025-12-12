@@ -73,19 +73,28 @@ def ask_grok(prompt: str) -> str:
     )
     return response.choices[0].message.content.strip()
 
-# ==================== DATA FETCHER ====================
+# ==================== DATA FETCHER (NO MORE RATE LIMITS) ====================
 def get_market_snapshot():
     snapshot = {}
     for sym in SYMBOLS:
-        ticker = yf.Ticker(sym)
-        hist = ticker.history(period="5d", interval="5m")
-        info = ticker.info
-        snapshot[sym] = {
-            "price": round(hist["Close"].iloc[-1], 4),
-            "volume": int(hist["Volume"].iloc[-1]),
-            "change_pct": round((hist["Close"].iloc[-1] / hist["Close"].iloc[-2] - 1) * 100, 2),
-            "name": info.get("longName", sym)
-        }
+        try:
+            # Only fetch today's data — avoids Yahoo rate limit
+            ticker = yf.Ticker(sym)
+            hist = ticker.history(period="1d", interval="1m")  # 1-minute bars today only
+            price = hist["Close"].iloc[-1]
+            volume = int(hist["Volume"].iloc[-1]) if not hist.empty else 0
+            change = 0
+            if len(hist) > 1:
+                change = round((price / hist["Close"].iloc[-2] - 1) * 100, 2)
+            snapshot[sym] = {
+                "price": round(price, 4),
+                "volume": volume,
+                "change_pct": change,
+                "name": ticker.info.get("longName", sym)
+            }
+        except Exception as e:
+            print(f"yfinance failed for {sym}: {e}")
+            snapshot[sym] = {"price": 0, "volume": 0, "change_pct": 0, "name": sym}
     return snapshot
 
 # ==================== PROMPT ENGINEERING ====================
