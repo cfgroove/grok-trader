@@ -3,3 +3,5 @@ pandas
 python-dotenv
 openai
 alpaca-py
+pytz
+schedule
