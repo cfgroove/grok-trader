@@ -1,124 +1,64 @@
-# main.py — BULLETPROOF: NO RED ERRORS + PORTFOLIO EVERY MINUTE
+# main.py — LOCAL TEST VERSION (email works instantly)
 import time
 import json
 import yfinance as yf
+import pytz
 from datetime import datetime
 from openai import OpenAI
 import os
 import sys
 from dotenv import load_dotenv
+import smtplib
+from email.mime.text import MIMEText
+
 load_dotenv()
 
-LIVE_TRADING = False
-SYMBOLS = ["TQQQ", "SOXL", "QQQ", "NVDA", "TSLA", "GLD", "SLV", "BTC-USD", "COIN"]
-SCENARIO = "situational_awareness"
+# Force email test mode
+FORCE_EMAIL_TEST = True   # ← Set to False when done testing
 
 client = OpenAI(api_key=os.getenv("XAI_API_KEY"), base_url="https://api.x.ai/v1")
 
-# Alpaca (unchanged)
-if os.getenv("ALPACA_KEY") and os.getenv("ALPACA_SECRET"):
-    from alpaca.trading.client import TradingClient
-    from alpaca.trading.requests import MarketOrderRequest
-    from alpaca.trading.enums import OrderSide, TimeInForce
-    trading_client = TradingClient(os.getenv("ALPACA_KEY"), os.getenv("ALPACA_SECRET"), paper=not LIVE_TRADING)
-else:
-    trading_client = None
+cash = 1_000_000.0
+positions = {"TQQQ": 8000}  # fake position so email has something to show
 
-cash = 1000000.0
-positions = {s: 0 for s in SYMBOLS}
-risk_percent = 90
-
-def safe_json_parse(text):
-    # Force extract JSON — ignore all extra text
-    text = text.strip()
-    start = text.find('{')
-    if start == -1:
-        return {"symbol": "TQQQ", "action": "hold", "qty": 0, "reasoning": "No JSON"}
-    
-    # Find the end of the first complete JSON block
-    brace_count = 0
-    end = len(text)
-    for i in range(start, len(text)):
-        if text[i] == '{':
-            brace_count += 1
-        elif text[i] == '}':
-            brace_count -= 1
-            if brace_count == 0:
-                end = i + 1
-                break
-    
-    json_str = text[start:end]
+def total_value():
     try:
-        return json.loads(json_str)
-    except json.JSONDecodeError:
-        # Ultra-safe fallback
-        return {"symbol": "TQQQ", "action": "hold", "qty": 0, "reasoning": "Parse failed — holding"}
+        prices = {s: yf.Ticker(s).history(period="1d")["Close"].iloc[-1] for s in ["TQQQ", "NVDA"]}
+        return cash + sum(positions.get(s,0) * prices.get(s,0) for s in positions)
+    except:
+        return cash
 
-print("GROK TRADER LIVE — BULLETPROOF NO ERRORS")
-print(f"Starting cash: ${cash:,.2f}")
-sys.stdout.flush()
+def send_daily_email():
+    est = pytz.timezone('US/Eastern')
+    now = datetime.now(est)
+    value = total_value()
+    roi = (value - 1_000_000) / 1_000_000 * 100
 
-while True:
+    body = f"""
+    <h2>Grok Trader Daily Report — TEST MODE</h2>
+    <p><strong>Time:</strong> {now.strftime('%I:%M %p %Z')}</p>
+    <p><strong>Portfolio:</strong> ${value:,.2f}</p>
+    <p><strong>ROI:</strong> {roi:+.2f}%</p>
+    <p><strong>Cash:</strong> ${cash:,.2f}</p>
+    <p>This is a test — you're crushing it.</p>
+    """
+
+    msg = MIMEText(body, "html")
+    msg["Subject"] = f"Grok Trader TEST — {roi:+.2f}%"
+    msg["From"] = "Grok Trader <cfgroove@gmail.com>"
+    msg["To"] = "chase@cfgroove.com"
+
     try:
-        prices = {s: yf.Ticker(s).history(period="1d")["Close"].iloc[-1] for s in SYMBOLS}
-        total = cash + sum(positions.get(s, 0) * prices[s] for s in SYMBOLS)
-
-        # PORTFOLIO UPDATE — EVERY MINUTE, ALWAYS
-        print(f"\n=== {datetime.now().strftime('%H:%M:%S')} PORTFOLIO UPDATE ===")
-        print(f"TOTAL: ${total:,.0f} | CASH: ${cash:,.0f} | ROI: {((total - 1000000) / 1000000 * 100):+.2f}%")
-        print(f"POSITIONS: {positions}")
-        sys.stdout.flush()
-
-        # FORCE CLEAN JSON — Grok must obey
-        prompt = f"""Cash ${cash:,.0f} | Risk {risk_percent}% | Positions {positions} | Prices {json.dumps({s: round(prices[s], 2) for s in SYMBOLS})}. {SCENARIO}
-
-OUTPUT ONLY VALID JSON, NO EXTRA TEXT:
-{{
-  "symbol": "TQQQ",
-  "action": "buy" or "sell" or "hold",
-  "qty": integer,
-  "reasoning": "short reason"
-}}"""
-        resp = client.chat.completions.create(model="grok-3", messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=100)
-        d = safe_json_parse(resp.choices[0].message.content.strip())
-
-        sym = d.get("symbol", "TQQQ")
-        if sym not in SYMBOLS:
-            sym = "TQQQ"
-        action = d.get("action", "hold")
-        qty = d.get("qty", 0)
-        reason = d.get("reasoning", "No reason")
-
-        price = prices[sym]
-        trade = "HOLD"
-
-        if action == "buy" and qty > 0:
-            max_qty = int((cash * risk_percent / 100) // price)
-            qty = min(qty, max_qty)
-            if qty > 0:
-                cash -= qty * price
-                positions[sym] = positions.get(sym, 0) + qty
-                trade = f"BUY {qty} {sym}"
-                if trading_client and LIVE_TRADING:
-                    order_symbol = sym.replace("-USD", "")
-                    order = MarketOrderRequest(symbol=order_symbol, qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.GTC)
-                    trading_client.submit_order(order)
-
-        elif action == "sell" and positions.get(sym, 0, 0) >= qty:
-            cash += qty * price
-            positions[sym] -= qty
-            trade = f"SELL {qty} {sym}"
-            if trading_client and LIVE_TRADING:
-                order_symbol = sym.replace("-USD", "")
-                order = MarketOrderRequest(symbol=order_symbol, qty=qty, side=OrderSide.SELL, time_in_force=TimeInForce.GTC)
-                trading_client.submit_order(order)
-
-        # CLEAN TRADE LOG
-        print(f"TRADE: {trade} {sym} @ ${price:.2f} | {reason}")
-        sys.stdout.flush()
-
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login("cfgroove@gmail.com", os.getenv("GMAIL_APP_PASSWORD"))
+            server.send_message(msg)
+        print("EMAIL SENT SUCCESSFULLY — check your inbox!")
     except Exception as e:
-        print(f"CRITICAL ERROR: {e} — continuing...")
-        sys.stdout.flush()
+        print(f"EMAIL FAILED: {e}")
 
-    time.sleep(60)
+# Run once and exit — perfect for testing
+print("Sending test email in 5 seconds...")
+time.sleep(5)
+send_daily_email()
+print("Test complete. You're ready for Render.")
